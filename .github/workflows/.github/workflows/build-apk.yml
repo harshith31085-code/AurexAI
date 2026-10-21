@@ -3,9 +3,8 @@ name: Build AurexAI APK
 on:
   workflow_dispatch:
   push:
-    paths:
-      - 'AurexAI-Android-Source.zip'
-      - '.github/workflows/build-apk.yml'
+    branches:
+      - main
 
 jobs:
   build:
@@ -24,17 +23,91 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Extract source code
+      - name: Extract source ZIP
         run: |
-          unzip AurexAI-Android-Source.zip -d source
+          mkdir extracted
+          unzip AurexAI-Android-Source.zip -d extracted
+          find extracted -name MainActivity.java -print
 
-      - name: Build Android APK
+      - name: Create Android project
         run: |
-          cd source
-          gradle assembleDebug
+          MAIN=$(find extracted -name MainActivity.java -print -quit)
+          if [ -z "$MAIN" ]; then
+            echo "ERROR: MainActivity.java not found in ZIP"
+            exit 1
+          fi
+
+          mkdir -p app/src/main/java/com/harshith/aurexai
+
+          cp "$MAIN" app/src/main/java/com/harshith/aurexai/MainActivity.java
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = 'AurexAI'
+          include ':app'
+          EOF
+
+          cat > build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.7.3' apply false
+          }
+          EOF
+
+          cat > app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.harshith.aurexai'
+              compileSdk 35
+
+              defaultConfig {
+                  applicationId 'com.harshith.aurexai'
+                  minSdk 23
+                  targetSdk 28
+                  versionCode 1
+                  versionName '1.0'
+              }
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET"/>
+              <application
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar"
+                  android:label="AurexAI">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+      - name: Build APK
+        run: gradle --no-daemon assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: AurexAI-debug-APK
-          path: source/app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/debug/app-debug.apk
